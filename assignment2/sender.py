@@ -32,6 +32,9 @@ class Sender():
         self.time_log = list()
         self.ack_log = list()
 
+        self.seqnum_log_file = open('seqnum.log', 'w')
+        self.ack_log_file = open('ack.log', 'w')
+        self.time_log_file = open('time.log', 'w')
         
         seq_num = 0
         with open(data_file_path, 'r') as f:
@@ -41,9 +44,9 @@ class Sender():
 
                 seq_num += 1
                 chunk = f.read(self.MAX_DATA_LENGTH)
-            self.packets_list.append(packet.create_eot(seq_num))
+            # self.packets_list.append(packet.create_eot(seq_num))
 
-        print("Number of packets is: " + str(len(self.packets_list)))
+        print("Number of data packets is: " + str(len(self.packets_list)))
 
         # Initlialize the sliding window 
         self.sliding_window = list()
@@ -63,33 +66,36 @@ class Sender():
 
             if recv_packet.type == 2:
                 self.time_log.append(time.time())
-                print('EOT')
-                print('ack_log:', self.ack_log)
-                print('time_log:', self.time_log[1] - self.time_log[0])
-                print('seqnum_log:', self.seqnum_log)
+                # print('EOT. WRITE LOG.')
+
+                for ack in self.ack_log:
+                    self.ack_log_file.write(str(ack) + '\n')
+                self.ack_log_file.close()
+                
+                print(self.time_log[1] - self.time_log[0])
+                self.time_log_file.write(str(abs(self.time_log[1] - self.time_log[0])))
+                self.time_log_file.close()
+
+                for num in self.seqnum_log:
+                    self.seqnum_log_file.write(str(num) + '\n')
+                self.seqnum_log_file.close()
+                # print('ack_log:', self.ack_log)
+                # print('time_log:', self.time_log[1] - self.time_log[0])
+                # print('seqnum_log:', self.seqnum_log)
 
                 os._exit(0)
-                break
 
             self.lock.acquire()
 
             if (self.next_ack + self.WINDOW_SIZE)%self.SEQ_NUM_MODULO > self.next_ack:
                 if recv_packet.seq_num >= self.next_ack and recv_packet.seq_num < self.next_ack + self.WINDOW_SIZE:
-                    self.next_ack = (self.next_ack + 1) % self.SEQ_NUM_MODULO
+                    self.next_ack = (recv_packet.seq_num + 1) % self.SEQ_NUM_MODULO
             else:
                 if recv_packet.seq_num >= self.next_ack or recv_packet.seq_num < (self.next_ack + self.WINDOW_SIZE)%self.SEQ_NUM_MODULO:
-                    self.next_ack = (self.next_ack + 1) % self.SEQ_NUM_MODULO
+                    self.next_ack = (recv_packet.seq_num + 1) % self.SEQ_NUM_MODULO
             self.lock.release()
-            # print('self.next_ack', self.next_ack)
-            
-            # if self.next_ack == recv_packet.seq_num:
-            #     self.lock.acquire()
-            #     self.next_ack = (self.next_ack + 1) % self.SEQ_NUM_MODULO
-            #     self.lock.release()
 
-            #     self.sliding_window.pop(0)
-            #     if len(self.packets_list) != 0:
-            #         self.sliding_window.append(self.packets_list.pop(0))
+
 
             
     def send(self):
@@ -106,11 +112,7 @@ class Sender():
             pack_sent += 1
             self.seqnum_log.append(pack.seq_num)
 
-        while len(self.sliding_window) != 0 and len(self.packets_list) != 0:
-            # start a timer
-            
-            # foo += 1
-            # print('sender: ', len(self.sliding_window), foo)
+        while len(self.sliding_window) != 0 or len(self.packets_list) != 0:
 
             while time.time() - start_time < self.TIMEOUT:
                 if cur_ack != self.next_ack:
@@ -118,17 +120,10 @@ class Sender():
 
                     start_time = time.time()
                     self.lock.acquire()
-                    # for i in range(len(self.sliding_window)):
-                    #     if (self.sliding_window[i].seq_num + 1) % self.SEQ_NUM_MODULO == self.next_ack and len(self.packets_list) != 0:
-                    #         for _ in range(i):
-                    #             self.sliding_window.pop(0)
-                    #             print('pack_sent -= 1')
-                    #             pack_sent -= 1
-                    #             if len(self.packets_list) != 0:
-                    #                 self.sliding_window.append(self.packets_list.pop(0))
-                    # print('move_window', 'cur_ack=',cur_ack,' ', ' next_ack=', self.next_ack, ' pack_sent=', pack_sent)
                     
-                    for _ in range((self.next_ack - cur_ack)%32):
+                    print('move_window', 'cur_ack=',cur_ack,' ', ' next_ack=', self.next_ack, ' pack_sent=', pack_sent)
+
+                    for _ in range((self.next_ack - cur_ack)%self.SEQ_NUM_MODULO):
                         self.sliding_window.pop(0)
                         pack_sent -= 1
                         # print('pack_sent -= 1')
@@ -140,39 +135,16 @@ class Sender():
                     
 
                     if pack_sent < len(self.sliding_window):
-                        # for pack in self.sliding_window[pack_sent:]:
-                        #     print('send pack ++', pack.seq_num)
+                        for pack in self.sliding_window[pack_sent:]:
+                            print('send pack ++', pack.seq_num)
                             self.udp_socket.sendto(pack.get_udp_data(), (self.host_addr, self.emulator_port))
                             pack_sent += 1
                             self.seqnum_log.append(pack.seq_num)
                     self.lock.release()
 
 
-
-
-            # while time.time() - start_time < self.TIMEOUT:
-            #     if cur_ack == self.next_ack:
-            #         pass
-            #     else:
-            #         start_time = time.time()
-            #         pack_sent = self.next_ack - 
-            #         if pack_sent <= self.WINDOW_SIZE:
-            #             for pack in self.sliding_window[pack_sent:]:
-
-
-            # # resend every packet in the sliding window
-               # self.lock.acquire()
-            # for pack in self.sliding_window:
-            #     self.udp_socket.sendto(pack.get_udp_data(), ('',10001))
-            #     pack_sent = (pack_sent + 1)% self.SEQ_NUM_MODULO
-                
-            # self.lock.release()
-
-
-            # Time out. Re-send packets in the sliding window
-            # self.lock.acquire()
             start_time = time.time()
-            # print('TIMEOUT: self.next_ack', self.next_ack)
+            print('TIMEOUT: self.next_ack', self.next_ack)
 
             # self.lock.acquire()
             for pack in self.sliding_window:
@@ -181,40 +153,9 @@ class Sender():
                 # print('timeout send: ', pack.seq_num)
             # self.lock.release()
 
-            # while time.time() - start_time < self.TIMEOUT:
-            #     if self.next_ack == cur_ack:
-            #         pass
-            #     else:
-
-
-#####################################################################
-
-            # if time.time() - start_time > self.TIMEOUT:
-            #     print('TIMEOUT')
-            #     # resend everything
-            #     pack_sent = 0
-            #     for pack in self.sliding_window:
-            #         self.udp_socket.sendto(pack.get_udp_data(), ('',10001))
-            #         print('send pkt', pack.seq_num)
-            #         pack_sent += 1
-            #     start_time = time.time()
-
-            
-            # elif self.next_ack != cur_ack:
-            #     print('send, cur_ack:',cur_ack, 'pack_sent', pack_sent)
-            #     if cur_ack == None:
-            #         cur_ack = 0
-            #     acked_pack_count = (self.next_ack - cur_ack) % 32
-            #     cur_ack = self.next_ack
-            #     if pack_sent - acked_pack_count > 0:
-            #         pack_sent -= acked_pack_count
-            #     else:
-            #         pack_sent = 0
-            #     for pack in self.sliding_window[pack_sent:]:
-            #         self.udp_socket.sendto(pack.get_udp_data(), ('',10001))
-            #         pack_sent += 1
-
-            #     start_time = time.time()
+        # Send all the content 
+        # print('SEND EOT', self.next_ack)
+        self.udp_socket.sendto(packet.create_eot(self.next_ack).get_udp_data(), (self.host_addr, self.emulator_port))
                 
 
 # Main
@@ -237,10 +178,4 @@ if __name__ == '__main__':
 
     recv_thread.start()
     send_thread.start()
-
-    print('done')
-
-
-
-
 
